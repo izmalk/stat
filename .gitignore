@@ -1,0 +1,14 @@
+# Generated test scripts (regenerated from Markdown sources)
+*.sh
+!helpers.sh
+
+# Generated task directories
+*/task.yaml
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
