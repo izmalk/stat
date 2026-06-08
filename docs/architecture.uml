@@ -1,0 +1,85 @@
+@startuml
+skinparam backgroundColor transparent
+skinparam defaultFontName "Noto Sans"
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam packageStyle rectangle
+
+skinparam component {
+  BackgroundColor #f0f4f8
+  BorderColor #333333
+  FontSize 12
+}
+
+skinparam note {
+  BackgroundColor #fffde7
+  BorderColor #c0a000
+}
+
+package "Markdown source\n(docs/tutorial/)" as src {
+  [page-1.md] as p1
+  [page-2.md] as p2
+  [page-N.md] as pN
+}
+
+note right of src
+  Contains:
+  • `` ```shell `` blocks (extracted)
+  • `` ```text `` blocks (ignored)
+  • <!-- test:* --> annotations
+end note
+
+package "Extraction" as extract {
+  [extract_commands.py] as extractor
+}
+
+package "Generated artifacts\n(tests/tutorial/)" as gen {
+  [page-1.sh] as s1
+  [page-2.sh] as s2
+  [page-N.sh] as sN
+  [page-1/task.yaml] as t1
+  [page-2/task.yaml] as t2
+  [page-N/task.yaml] as tN
+}
+
+package "Spread execution" as spread {
+  [Multipass VM\n(Ubuntu 24.04)] as vm
+
+  package "Inside VM" as inner {
+    [helpers.sh] as helpers
+    [page-1.sh\n(priority 300)] as run1
+    [page-2.sh\n(priority 200)] as run2
+    [page-N.sh\n(priority 100)] as runN
+  }
+}
+
+p1 --> extractor
+p2 --> extractor
+pN --> extractor
+
+extractor --> s1
+extractor --> s2
+extractor --> sN
+extractor --> t1
+extractor --> t2
+extractor --> tN
+
+s1 --> vm : spread mirrors\nproject tree
+s2 --> vm
+sN --> vm
+
+vm --> run1 : executes in\npriority order
+run1 --> run2
+run2 --> runN
+
+helpers -[dashed]-> run1 : sourced by\neach script
+helpers -[dashed]-> run2
+helpers -[dashed]-> runN
+
+note bottom of spread
+  On failure with -debug flag:
+  SSH into VM, inspect juju status,
+  re-run commands interactively.
+end note
+
+@enduml
