@@ -190,7 +190,7 @@ Generated files (`.sh`, `task.yaml`) are **not committed to git**. They are rege
 
 ## Naming
 
-The name **STAT** (*Spread Tutorial Automated Testing*) is experimental. Feedback and alternative suggestions are welcome: [open an issue](https://github.com/canonical/stat/issues).
+The name **STAT** (*Spread Tutorial Automated Testing*) is experimental. Feedback and alternative suggestions are welcome: [open an issue](https://github.com/izmalk/stat/issues/new).
 
 ## License
 
