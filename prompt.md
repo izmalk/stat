@@ -34,7 +34,7 @@ Set up STAT for my project by completing these steps:
    - `extract_commands.py` → `tests/tutorial/extract_commands.py`
    - `helpers.sh` → `tests/tutorial/helpers.sh`
    - `Makefile.template` → `tests/tutorial/Makefile` (customise)
-   - `spread.yaml.template` → `spread.yaml` at project root (customise)
+   - `spread.yaml.template` → `tests/tutorial/spread.yaml` (customise; see note below about placement)
 
 2. **Customise `spread.yaml`** (look for `TODO` comments):
 
@@ -43,7 +43,7 @@ Set up STAT for my project by completing these steps:
    - Set `instance_name` in `allocate`/`discard` blocks
    - Add any pre-installed snaps or packages your tutorial needs in the `allocate` block
    - Adjust VM resources (`SPREAD_VM_CPUS`, `SPREAD_VM_MEM`, `SPREAD_VM_DISK`) if needed
-   - Set the `suites:` path to match where your test scripts will live
+   - Set the `suites:` path to match where your test scripts will live (use relative `./tasks/` when spread.yaml is inside the test directory)
 
 3. **Customise `tests/tutorial/Makefile`**:
 
@@ -57,6 +57,16 @@ Set up STAT for my project by completing these steps:
 5. **Update `.gitignore`** to exclude generated files (`*.sh` and `*/task.yaml` in the test directory)
 
 6. **Do NOT run the tests** as part of this task. After completing the setup, suggest running `make -f tests/tutorial/Makefile test` as the next step.
+
+### spread.yaml placement
+
+Place `spread.yaml` **inside** the test directory (`tests/tutorial/spread.yaml`) rather than at the project root, especially when the project already has a root-level `spread.yaml` for other tests (e.g. integration tests). This keeps the tutorial suite self-contained and avoids conflicts.
+
+When `spread.yaml` lives in `tests/tutorial/`:
+- Use a **self-contained project name** (e.g. `opensearch-tutorial`) distinct from the root spread project
+- Set `suites:` to `./tasks/` (relative to the spread.yaml location)
+- Run spread from within the `tests/tutorial/` directory, or use `tox` with `change_dir`
+- The `$SPREAD_PATH` variable will point to `tests/tutorial/` — the location of `spread.yaml`
 
 ### Available annotations
 
@@ -78,7 +88,7 @@ Set up STAT for my project by completing these steps:
 
 **Priority ordering:** Spread executes tasks with higher priority first. Assign decreasing priorities by a margin of 100 (e.g. 700, 600, 500, ..., 100) so page 1 runs first and page 7 runs last.
 
-**Environment variables don't persist between Spread tasks.** Each task is a separate bash invocation. If a later page needs variables from an earlier one, it must re-export them. However, files written to disk (e.g. `~/.aws/config`, Juju state in `~/.local/share/juju`) DO persist across tasks since they run on the same VM.
+**Environment variables don't persist between Spread tasks.** Each task is a separate bash invocation. If a later page needs variables from an earlier one, it must re-export them (use `<!-- test:set-variables -->` again). However, files written to disk (e.g. `~/.aws/config`, Juju state in `~/.local/share/juju`) DO persist across tasks since they run on the same VM.
 
 **`newgrp` opens an interactive shell** — it cannot be used directly in a script. If your tutorial has a `newgrp` command (e.g. for snap groups), wrap it with a hidden `<!-- test:run -->` block using a heredoc pattern: `newgrp mygroup << 'EOF'\ntrue\nEOF`.
 
@@ -88,9 +98,82 @@ Set up STAT for my project by completing these steps:
 
 **Pre-install in spread.yaml, not in the tutorial script.** VM-level provisioning (creating the VM, installing base tooling like Multipass itself) belongs in the `allocate:` block of `spread.yaml`, not in the tutorial annotations. The tutorial's first page should start from "inside the VM."
 
-**Await-idle after deploys.** Juju charms take time to settle. Place `<!-- test:await-idle --timeout N -->` after every `juju deploy` or `juju integrate` block. Use generous timeouts (600s for simple charms, 1200s+ for bundles like cos-lite or multi-unit deployments). Use `--allow-blocked APP` when a charm is expected to be blocked until a subsequent integration is made.
+**Await-idle after deploys AND integrations.** Juju charms take time to settle. Place `<!-- test:await-idle --timeout N -->` after every `juju deploy` or `juju integrate` block. Use generous timeouts (600s for simple charms, 1200s+ for bundles like cos-lite or multi-unit deployments). Use `--allow-blocked APP` when a charm is expected to be blocked until a subsequent integration is made.
+
+**Split shell blocks when actions depend on state.** If a tutorial shows two commands in the same shell block (e.g. `juju integrate ...` followed by `juju run ... get-credentials`), the second may fail because the first hasn't settled. Split them into **separate** `` ```shell `` blocks with `<!-- test:await-idle -->` between them.
+
+**Add sleeps after scaling operations.** After `juju add-unit` or similar scale-up commands, internal rebalancing (e.g. shard redistribution in databases) takes time. A `<!-- test:wait --seconds 60 -->` before assertions that check cluster state prevents flaky failures.
 
 **Retry flaky commands.** Network-dependent commands (like `aws s3 ls` against a freshly-enabled MinIO) may fail on first attempt. Use either `<!-- test:run -->` with a retry loop, or `<!-- test:retry -->` annotation.
+
+**Use `--channel` in deploy commands.** Always include `--channel` in `juju deploy` commands in the tutorial to pin to a specific track. Omitting it makes the tutorial dependent on whichever channel is marked as default at the time, causing drift.
+
+### CI integration
+
+For CI, the recommended approach is:
+
+1. **tox** targets for extraction and test execution
+2. **GitHub Actions** workflow for scheduled/on-demand runs
+
+#### tox integration
+
+Add two environments to your project's `tox.ini`:
+
+```ini
+[testenv:tutorial-extract]
+description = Regenerate tutorial test scripts from docs
+deps =
+skip_install = true
+commands =
+    python3 {tox_root}/tests/tutorial/extract_commands.py {tox_root}/docs/tutorial/ {tox_root}/tests/tutorial/tasks/
+
+[testenv:tutorial]
+description = Run tutorial end-to-end tests via spread
+deps =
+skip_install = true
+allowlist_externals =
+    spread
+change_dir = {tox_root}/tests/tutorial
+commands =
+    python3 {tox_root}/tests/tutorial/extract_commands.py {tox_root}/docs/tutorial/ {tox_root}/tests/tutorial/tasks/
+    spread -abend -vv multipass:ubuntu-24.04-64:tasks/
+```
+
+**Important:** Use `change_dir = {tox_root}/tests/tutorial` so spread discovers the tutorial's `spread.yaml` (not a root-level one meant for other tests).
+
+#### GitHub Actions
+
+```yaml
+name: Tutorial tests
+on:
+  schedule:
+    - cron: '0 3 1 * *'  # Monthly
+  workflow_dispatch:
+
+jobs:
+  tutorial:
+    runs-on: [self-hosted, linux, AMD64, X64, xlarge, noble]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Multipass
+        run: sudo snap install multipass
+      - name: Install Go + Spread
+        run: |
+          sudo snap install go --classic
+          go install github.com/canonical/spread/cmd/spread@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Install tox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tox
+      - name: Run tutorial tests
+        run: tox -e tutorial
+      - name: Cleanup VM
+        if: always()
+        run: multipass delete --purge my-tutorial-vm 2>/dev/null || true
+```
+
+**Note:** Self-hosted runner labels (like `xlarge`) may trigger actionlint warnings about "unknown labels". This is a false positive — the linter only knows about GitHub-hosted runner labels.
 
 ### My tutorial
 
@@ -98,19 +181,20 @@ Locate the tutorial pages in this repository (typically under `docs/tutorial/` o
 
 Read each page in sequence to understand the full flow before making any changes.
 
-After completing the implementation, verify by running `python3 tests/tutorial/extract_commands.py <tutorial_source_dir> tests/tutorial/` and checking that generated scripts don't contain commands that should have been skipped.
+After completing the implementation, verify by running `python3 tests/tutorial/extract_commands.py <tutorial_source_dir> tests/tutorial/tasks/` and checking that generated scripts don't contain commands that should have been skipped.
 
 ## Verification checklist
 
 After the agent completes the task, verify:
 
-- [ ] `spread.yaml` exists at project root with correct project name, path, VM name, and pre-installs
+- [ ] `spread.yaml` exists (either at project root or in `tests/tutorial/`) with correct project name, path, VM name, and pre-installs
 - [ ] `tests/tutorial/Makefile` has correct SCRIPTS list and paths
 - [ ] `tests/tutorial/extract_commands.py` and `tests/tutorial/helpers.sh` are present (unmodified from STAT repo)
 - [ ] `.gitignore` excludes generated `*.sh` and `*/task.yaml` in the test directory
 - [ ] Every tutorial page has a `<!-- test:spread -->` metadata block with appropriate priority and kill-timeout
 - [ ] No interactive/GUI/watch/browser commands appear in `` ```shell `` blocks (they use `` ```bash `` or similar)
 - [ ] `juju deploy`/`integrate` blocks are followed by `<!-- test:await-idle -->` (Juju tutorials only)
+- [ ] Commands that depend on state from a previous command are in **separate** shell blocks with appropriate waits between
 - [ ] Running `python3 extract_commands.py <input_dir> <output_dir>` succeeds and generates correct scripts
 - [ ] Generated `.sh` scripts don't contain skipped commands (grep for known patterns)
 
@@ -122,3 +206,8 @@ After completing the implementation, **do not run the tests automatically**. Ins
 make -f tests/tutorial/Makefile test-continue
 ```
 
+Or, if tox is configured:
+
+```
+tox -e tutorial
+```

@@ -4,6 +4,7 @@ A tool for testing documentation tutorials end-to-end. STAT extracts shell comma
 
 Developed for [Canonical](https://canonical.com/) **Charmed Operator** tutorials to catch tutorial drift as the product changes. Actively used in production:
 
+- [Charmed OpenSearch](https://github.com/canonical/opensearch-operator/tree/2/edge/tests/tutorial)
 - [Charmed Apache Kafka](https://github.com/canonical/kafka-operator/tree/main/tests/tutorial)
 - [Charmed Apache Spark](https://github.com/canonical/spark-k8s-bundle/tree/main/python/tests/tutorial)
 
@@ -36,7 +37,7 @@ Get STAT running against your tutorial in four steps.
    cp <stat-repo>/extract_commands.py tests/tutorial/
    cp <stat-repo>/helpers.sh tests/tutorial/
    cp <stat-repo>/Makefile.template tests/tutorial/Makefile
-   cp <stat-repo>/spread.yaml.template spread.yaml
+   cp <stat-repo>/spread.yaml.template tests/tutorial/spread.yaml
    ```
 
 2. **Customise templates**: edit `spread.yaml` and `tests/tutorial/Makefile`:
@@ -50,6 +51,20 @@ Get STAT running against your tutorial in four steps.
    ```bash
    make -f tests/tutorial/Makefile test
    ```
+
+## spread.yaml placement
+
+Place `spread.yaml` **inside** the test directory (`tests/tutorial/spread.yaml`) rather than at the project root. This is especially important when the project already has a root-level `spread.yaml` for other tests (e.g. integration tests).
+
+When `spread.yaml` lives in `tests/tutorial/`:
+
+- Use a **self-contained project name** (e.g. `opensearch-tutorial`) distinct from any root-level spread project
+- Set `suites:` to `./tasks/` (relative to spread.yaml)
+- Run spread from within `tests/tutorial/`, or use tox with `change_dir`
+- `$SPREAD_PATH` points to the directory containing `spread.yaml`
+- `$SPREAD_TASK` is set by Spread to the task's relative path (e.g. `tasks/2-deploy`)
+
+This approach avoids conflicts with other test suites and keeps the tutorial test infrastructure self-contained.
 
 ## Annotations
 
@@ -119,15 +134,15 @@ Both templates contain `TODO` comments marking values you must set.
 
 ### `spread.yaml`
 
-Copy `spread.yaml.template` to your project root. Key settings:
+Copy `spread.yaml.template` into your test directory. Key settings:
 
 | Field | Purpose |
 |---|---|
-| `project` | Spread project identifier |
+| `project` | Spread project identifier (use a distinct name from root spread.yaml) |
 | `path` | Where project files are mirrored inside the VM |
 | `instance_name` | Multipass VM name (in `allocate`/`discard` scripts) |
 | `SPREAD_VM_CPUS/MEM/DISK` | VM resources (env var overrides) |
-| `suites` | Path to your test suite directory |
+| `suites` | Path to your test suite directory (use `./tasks/` for self-contained setup) |
 
 ### `Makefile`
 
@@ -135,7 +150,7 @@ Copy `Makefile.template` into your test directory. Customise:
 
 - **`SCRIPTS`**: list of `output.sh:source.md` pairs (one per tutorial page)
 - **`ROOT`**: adjust `../..` levels if your test directory depth differs
-- **`SPREAD_JOB`**: the Spread job selector (default: `multipass:ubuntu-24.04-64:tests/tutorial/`)
+- **`SPREAD_JOB`**: the Spread job selector (default: `multipass:ubuntu-24.04-64:tasks/`)
 
 ### Environment variables
 
@@ -156,13 +171,76 @@ Copy `Makefile.template` into your test directory. Customise:
 
 **`test-debug`** is the most useful mode during development. On failure, Spread prints SSH credentials for the VM. Connect, inspect state, re-run commands manually, then `exit` to let Spread clean up.
 
+## CI integration
+
+### tox
+
+Add two environments to your `tox.ini`:
+
+```ini
+[testenv:tutorial-extract]
+description = Regenerate tutorial test scripts from docs
+deps =
+skip_install = true
+commands =
+    python3 {tox_root}/tests/tutorial/extract_commands.py {tox_root}/docs/tutorial/ {tox_root}/tests/tutorial/tasks/
+
+[testenv:tutorial]
+description = Run tutorial end-to-end tests via spread
+deps =
+skip_install = true
+allowlist_externals =
+    spread
+change_dir = {tox_root}/tests/tutorial
+commands =
+    python3 {tox_root}/tests/tutorial/extract_commands.py {tox_root}/docs/tutorial/ {tox_root}/tests/tutorial/tasks/
+    spread -abend -vv multipass:ubuntu-24.04-64:tasks/
+```
+
+**Important:** Use `change_dir = {tox_root}/tests/tutorial` so spread discovers the tutorial's `spread.yaml` (not a root-level one meant for other tests).
+
+### GitHub Actions
+
+```yaml
+name: Tutorial tests
+on:
+  schedule:
+    - cron: '0 3 1 * *'  # Monthly
+  workflow_dispatch:
+
+jobs:
+  tutorial:
+    runs-on: [self-hosted, linux, AMD64, X64, xlarge, noble]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Multipass
+        run: sudo snap install multipass
+      - name: Install Go + Spread
+        run: |
+          sudo snap install go --classic
+          go install github.com/canonical/spread/cmd/spread@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Install tox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tox
+      - name: Run tutorial tests
+        run: tox -e tutorial
+      - name: Cleanup VM
+        if: always()
+        run: multipass delete --purge my-tutorial-vm 2>/dev/null || true
+```
+
+**Note:** Self-hosted runner labels like `xlarge` may trigger actionlint warnings. This is a false positive — the linter only knows about GitHub-hosted runner labels.
+
 ## How it works
 
 ```
 ┌─────────────────┐       ┌──────────────────┐       ┌─────────────────┐
 │  docs/tutorial/  │──────▶│ extract_commands  │──────▶│ tests/tutorial/  │
-│  *.md (source)   │       │     .py          │       │  *.sh + task.yaml│
-└─────────────────┘       └──────────────────┘       └─────────────────┘
+│  *.md (source)   │       │     .py          │       │  tasks/*.sh +   │
+└─────────────────┘       └──────────────────┘       │  */task.yaml    │
+                                                      └─────────────────┘
                                                               │
                                                               ▼
                                                      ┌─────────────────┐
@@ -178,6 +256,33 @@ Copy `Makefile.template` into your test directory. Customise:
 
 Generated files (`.sh`, `task.yaml`) are **not committed to git**. They are regenerated before each test run.
 
+### Portability: `$SPREAD_TASK`
+
+Generated `task.yaml` files use `$SPREAD_TASK` (set by Spread at runtime to the task's relative path) rather than a hardcoded script path. This makes the suite portable — it works correctly regardless of where spread.yaml is placed within the project:
+
+```yaml
+execute: |
+  bash "$SPREAD_PATH/$SPREAD_TASK.sh"
+```
+
+At runtime, Spread sets `$SPREAD_TASK` to e.g. `tasks/2-deploy-opensearch`, so the full path resolves to `$SPREAD_PATH/tasks/2-deploy-opensearch.sh`.
+
+## Lessons learned
+
+These patterns emerged from real-world usage across multiple Charmed Operator tutorials:
+
+**Split shell blocks when actions depend on state.** If a tutorial shows two commands in the same shell block (e.g. `juju integrate ...` followed by `juju run ... get-credentials`), the second may fail because the first hasn't settled. Split them into **separate** `` ```shell `` blocks with `<!-- test:await-idle -->` between them.
+
+**Add sleeps after scaling operations.** After `juju add-unit` or similar scale-up commands, internal rebalancing (e.g. shard redistribution in databases) takes time. A `<!-- test:wait --seconds 60 -->` before assertions that check cluster state prevents flaky failures.
+
+**Use `--channel` in deploy commands.** Always include `--channel` in `juju deploy` commands in the tutorial to pin to a specific track. Omitting it makes the tutorial dependent on whichever channel is marked as default at the time, causing drift.
+
+**Verify revisions for the correct architecture/base.** Charmhub shows the highest revision across all architectures. The correct revision for `amd64` + `ubuntu@24.04` may differ from what's shown in the UI. Always verify via `charmcraft status <charm>`.
+
+**Be careful with root spread.yaml conflicts.** If the project has a root `spread.yaml` for integration tests, placing the tutorial `spread.yaml` at the root will conflict. Use the test-directory-local approach instead.
+
+**tox `change_dir` is essential.** Without it, tox runs spread from the project root, which picks up the wrong `spread.yaml` if one exists at the root level.
+
 ## File reference
 
 | File | Purpose |
@@ -187,6 +292,7 @@ Generated files (`.sh`, `task.yaml`) are **not committed to git**. They are rege
 | `spread.yaml.template` | Template Spread configuration (Multipass adhoc backend) |
 | `Makefile.template` | Template build/run automation |
 | `examples/sample-page.md` | Annotated tutorial page demonstrating all annotations |
+| `prompt.md` | AI agent prompt for automated STAT implementation |
 
 ## Naming
 

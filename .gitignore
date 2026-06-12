@@ -1,9 +1,9 @@
 # Generated test scripts (regenerated from Markdown sources)
-*.sh
+tasks/*.sh
 !helpers.sh
 
 # Generated task directories
-*/task.yaml
+tasks/*/task.yaml
 
 # Python
 __pycache__/

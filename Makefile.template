@@ -1,7 +1,7 @@
 # Tutorial test script generation and execution.
 #
 # Copy this file into your tests/tutorial/ directory (or similar) and
-# customise the SCRIPTS variable and paths.
+# customise the variables below.
 #
 # Run from the project root:
 #   make -f tests/tutorial/Makefile
@@ -25,6 +25,12 @@ ROOT     := $(abspath $(THIS_DIR)/../..)
 
 EXTRACT  := $(THIS_DIR)extract_commands.py
 
+# TODO: Set the tutorial source directory (relative to project root).
+TUTORIAL_SRC := $(ROOT)/docs/tutorial
+
+# Output directory for generated scripts (alongside this Makefile).
+TASKS_DIR := $(THIS_DIR)tasks
+
 # ---------------------------------------------------------------------------
 # Script → Markdown mapping (SCRIPTS)
 # ---------------------------------------------------------------------------
@@ -32,13 +38,17 @@ EXTRACT  := $(THIS_DIR)extract_commands.py
 # Execution order is determined by the ``priority`` field in each file's
 # ``<!-- test:spread ... -->`` metadata block.
 #
-# TODO: Replace these example entries with your actual tutorial pages.
-SCRIPTS := \
-    $(THIS_DIR)setup.sh:$(ROOT)/docs/tutorial/setup.md \
-    $(THIS_DIR)deploy.sh:$(ROOT)/docs/tutorial/deploy.md \
-    $(THIS_DIR)cleanup.sh:$(ROOT)/docs/tutorial/cleanup.md
-
-OUTPUTS := $(foreach pair,$(SCRIPTS),$(word 1,$(subst :, ,$(pair))))
+# NOTE: With directory discovery mode (recommended), you don't need to list
+# individual files here. The `extract` target auto-discovers all .md files
+# with spread metadata. Only define SCRIPTS if you need fine-grained control.
+#
+# TODO: Uncomment and customise if you need explicit pairs instead of discovery.
+# SCRIPTS := \
+#     $(TASKS_DIR)/setup.sh:$(TUTORIAL_SRC)/setup.md \
+#     $(TASKS_DIR)/deploy.sh:$(TUTORIAL_SRC)/deploy.md \
+#     $(TASKS_DIR)/cleanup.sh:$(TUTORIAL_SRC)/cleanup.md
+#
+# OUTPUTS := $(foreach pair,$(SCRIPTS),$(word 1,$(subst :, ,$(pair))))
 
 # ---------------------------------------------------------------------------
 # rel — convert an absolute path to a root-relative path
@@ -46,54 +56,40 @@ OUTPUTS := $(foreach pair,$(SCRIPTS),$(word 1,$(subst :, ,$(pair))))
 rel = $(patsubst $(ROOT)/%,%,$(1))
 
 # ---------------------------------------------------------------------------
-# Target: all  (default)
+# Target: extract  (directory discovery — recommended)
 # ---------------------------------------------------------------------------
-.PHONY: all
-all: $(OUTPUTS)
-
-# ---------------------------------------------------------------------------
-# Per-script build rules
-# ---------------------------------------------------------------------------
-define make_rule
-$(word 1,$(subst :, ,$(1))): $(word 2,$(subst :, ,$(1))) $(EXTRACT)
-	cd $(ROOT) && $(PYTHON) $(call rel,$(EXTRACT)) $(call rel,$(word 2,$(subst :, ,$(1)))) $(call rel,$(word 1,$(subst :, ,$(1))))
-endef
-$(foreach pair,$(SCRIPTS),$(eval $(call make_rule,$(pair))))
-
-# ---------------------------------------------------------------------------
-# Target: extract  (unconditional full regeneration via directory discovery)
-# ---------------------------------------------------------------------------
-# TODO: Adjust the input/output directory paths to match your project layout.
+# Auto-discovers all .md files with <!-- test:spread --> metadata.
 .PHONY: extract
 extract:
-	cd $(ROOT) && $(PYTHON) $(call rel,$(EXTRACT)) docs/tutorial/ tests/tutorial/
+	cd $(ROOT) && $(PYTHON) $(call rel,$(EXTRACT)) $(call rel,$(TUTORIAL_SRC))/ $(call rel,$(TASKS_DIR))/
 
 # ---------------------------------------------------------------------------
 # Spread configuration
 # ---------------------------------------------------------------------------
 SPREAD     ?= spread
-SPREAD_JOB ?= multipass:ubuntu-24.04-64:tests/tutorial/
+# The job selector. With spread.yaml in tests/tutorial/, tasks are under ./tasks/.
+SPREAD_JOB ?= multipass:ubuntu-24.04-64:tasks/
 
 # ---------------------------------------------------------------------------
 # Target: test  (abort on first failure)
 # ---------------------------------------------------------------------------
 .PHONY: test
 test: extract
-	$(SPREAD) -abend -vv $(SPREAD_JOB)
+	cd $(THIS_DIR) && $(SPREAD) -abend -vv $(SPREAD_JOB)
 
 # ---------------------------------------------------------------------------
 # Target: test-continue  (run all stages even if some fail)
 # ---------------------------------------------------------------------------
 .PHONY: test-continue
 test-continue: extract
-	$(SPREAD) -vv $(SPREAD_JOB)
+	cd $(THIS_DIR) && $(SPREAD) -vv $(SPREAD_JOB)
 
 # ---------------------------------------------------------------------------
 # Target: test-debug  (abort + interactive shell on failure)
 # ---------------------------------------------------------------------------
 .PHONY: test-debug
 test-debug: extract
-	$(SPREAD) -abend -vv -debug $(SPREAD_JOB)
+	cd $(THIS_DIR) && $(SPREAD) -abend -vv -debug $(SPREAD_JOB)
 
 # ---------------------------------------------------------------------------
 # Target: help
@@ -103,8 +99,7 @@ help:
 	@echo "Usage: make -f tests/tutorial/Makefile [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all            Regenerate scripts that are out of date (default)"
-	@echo "  extract        Unconditionally regenerate all scripts"
+	@echo "  extract        Regenerate all scripts via directory discovery"
 	@echo "  test           Run the tutorial suite (abort on first failure)"
 	@echo "  test-continue  Run all stages even if earlier ones fail"
 	@echo "  test-debug     Drop into an interactive shell on failure"
