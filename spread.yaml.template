@@ -1,9 +1,12 @@
 # Spread configuration for tutorial testing.
 #
-# Copy this file to your project root as `spread.yaml` and customise the
-# values marked with TODO.
+# Recommended placement: tests/tutorial/spread.yaml (self-contained alongside
+# the test scripts). This avoids conflicts with a root-level spread.yaml used
+# for other test suites (e.g. integration tests).
+#
+# Copy this file into your test directory and customise the values marked TODO.
 
-# TODO: Set your project name (used by Spread for identification).
+# TODO: Set your project name (use a distinct name from any root spread.yaml).
 project: my-project-tutorial
 
 # The project root is mirrored to this path inside the test VM.
@@ -46,9 +49,13 @@ backends:
       - ubuntu-24.04-64:
           workers: 1
 
-# TODO: Set the path to your tutorial test suite directory (relative to project root).
+# Suite path is relative to this spread.yaml file.
+# With the recommended placement (tests/tutorial/spread.yaml), the tasks/
+# directory sits alongside this file.
+#
+# TODO: Adjust if your generated scripts live elsewhere.
 suites:
-  tests/tutorial/:
+  ./tasks/:
     summary: Tutorial end-to-end test
     systems:
       - ubuntu-24.04-64
