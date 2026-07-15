@@ -70,21 +70,23 @@ This approach avoids conflicts with other test suites and keeps the tutorial tes
 
 Annotations are HTML comments in your Markdown source. They are invisible to readers but consumed by `extract_commands.py`. Only `` ```shell `` fenced code blocks are extracted; any other language tag (`` ```bash ``, `` ```text ``, etc.) is ignored.
 
-| Annotation | Effect |
-|---|---|
-| `<!-- test:spread -->` | Spread task metadata (`priority`, `kill-timeout`). Makes the page discoverable. |
-| `<!-- test:skip -->` | Skip the next `` ```shell `` block. |
-| `<!-- test:wait --seconds N -->` | Emit `sleep N` at that point. |
-| `<!-- test:await-idle -->` | Wait until all Juju units are `active/idle`. Accepts `--timeout S`, `--allow-blocked APP1,APP2`. |
-| `<!-- test:run-with-timeout --seconds N -->` | Run the next shell block inside `timeout N`; ignore exit code. |
-| `<!-- test:set-variables -->` | Run a command, extract named fields into shell variables. |
-| `<!-- test:run -->` | Emit hidden shell commands (not rendered in docs). |
-| `<!-- test:assert -->` | Hidden assertion. Relies on `set -e` to abort on failure. |
-| `<!-- test:retry -->` | Retry a command until success or timeout. Accepts `--timeout`, `--interval`, `--description`, `-- COMMAND`. |
+Some annotations are **single-line** (opening tag and `-->` on the same line); others are **multi-line** (opening tag on its own line, content on following lines, `-->` on a separate line). The parser requires multi-line annotations to have the opening tag alone on its line — `<!-- test:spread -->` (single-line) is **not** recognised.
+
+| Annotation | Form | Effect |
+|---|---|---|
+| `<!-- test:spread -->` | multi-line | Spread task metadata (`priority`, `kill-timeout`). Makes the page discoverable. At least one field is required. |
+| `<!-- test:skip -->` | single-line | Skip the next `` ```shell `` block (must be immediately before it; any text in between cancels the skip). |
+| `<!-- test:wait --seconds N -->` | single-line | Emit `sleep N` at that point. |
+| `<!-- test:await-idle -->` | single-line | Wait until all Juju units are `active/idle`. Accepts `--timeout S` (default 1200), `--allow-blocked APP1,APP2`. |
+| `<!-- test:run-with-timeout --seconds N -->` | single-line | Run the next shell block inside `timeout N`; ignore exit code. |
+| `<!-- test:set-variables -->` | multi-line | Run a command, extract named fields into shell variables. |
+| `<!-- test:run -->` | multi-line | Emit hidden shell commands (not rendered in docs). |
+| `<!-- test:assert -->` | multi-line | Hidden assertion. Relies on `set -e` to abort on failure. |
+| `<!-- test:retry -->` | single-line | Retry a command until success or timeout. Accepts `--timeout`, `--interval`, `--description`, `-- COMMAND`. |
 
 ### `<!-- test:spread -->`
 
-Place at the top of each tutorial page. Required for the page to be discovered and tested.
+Place at the top of each tutorial page. Required for the page to be discovered and tested. The opening tag must be on its own line (multi-line form); the single-line form `<!-- test:spread -->` is **not** recognised. At least one metadata field (e.g. `priority`) is required — an empty block is treated as absent and the page will be skipped during discovery.
 
 ```html
 <!-- test:spread
@@ -93,8 +95,8 @@ kill-timeout: 15m
 -->
 ```
 
-- **priority**: higher values run first (determines execution order across pages)
-- **kill-timeout**: Spread kills the task if it exceeds this duration
+- **priority**: higher values run first (determines execution order across pages). Defaults to `0` if omitted.
+- **kill-timeout**: Spread kills the task if it exceeds this duration. Defaults to `30m` if omitted.
 
 ### `<!-- test:set-variables -->`
 
@@ -125,6 +127,40 @@ The assertion runs with `set -e` active, so a non-zero exit aborts the test.
 ```html
 <!-- test:retry --timeout 600 --interval 60 --description "endpoint ready" -- curl -sf http://localhost:8080/health -->
 ```
+
+Defaults: `--timeout 1200` (20 min), `--interval 120` (2 min), `--description command`.
+
+### `<!-- test:await-idle -->`
+
+```html
+<!-- test:await-idle --timeout 900 -->
+<!-- test:await-idle --timeout 600 --allow-blocked my-app,data-integrator -->
+```
+
+Emits a call to the `wait_idle` helper (see `helpers.sh`), which polls `juju status` until every unit is `active/idle`.
+
+- **Default timeout**: the annotation injects `--timeout 1200` (20 min) when omitted. Note this differs from the `wait_idle` shell function's own default of 600s — the annotation always passes an explicit value.
+- **`--allow-blocked`**: comma-separated app names whose units are allowed to be `blocked/idle` (e.g. a data-integrator without a relation).
+- **`--interval`**: supported by the underlying `wait_idle` function but **not** passable via the annotation (silently dropped by the parser). To change the poll interval, edit the generated script or call `wait_idle` directly in a `<!-- test:run -->` block.
+
+### `<!-- test:skip -->` placement
+
+The skip marker must be **immediately** before the `` ```shell `` fence. Any **non-empty** line between the marker and the fence (including headings, paragraphs, or other annotations) cancels the skip:
+
+~~~markdown
+<!-- test:skip -->
+
+```shell
+# This block IS skipped
+```
+
+<!-- test:skip -->
+Some explanatory text here cancels the skip.
+
+```shell
+# This block is NOT skipped
+```
+~~~
 
 See [`examples/sample-page.md`](examples/sample-page.md) for a complete demonstration of all annotations in context.
 
@@ -251,7 +287,7 @@ jobs:
 ```
 
 1. **Source**: tutorial pages are standard MyST Markdown. Test annotations are HTML comments, invisible when rendered.
-2. **Extract**: `extract_commands.py` parses each `.md` file containing a `<!-- test:spread -->` block, extracts `` ```shell `` fences, processes annotations, and writes a self-contained `.sh` script plus a `task.yaml` for Spread.
+2. **Extract**: `extract_commands.py` parses each `.md` file containing a multi-line `<!-- test:spread ... -->` block (with at least one metadata field), extracts `` ```shell `` fences, processes annotations, and writes a self-contained `.sh` script plus a `task.yaml` for Spread.
 3. **Run**: Spread provisions a Multipass VM, mirrors the project into it, and executes each task in priority order. Scripts run with `set -euo pipefail`; any command failure aborts the page.
 
 Generated files (`.sh`, `task.yaml`) are **not committed to git**. They are regenerated before each test run.
