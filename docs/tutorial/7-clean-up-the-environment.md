@@ -34,7 +34,7 @@ When you remove Charmed OpenSearch as shown below, you will lose all the data in
 To remove Charmed OpenSearch and the model it is hosted on, run this command:
 
 ```shell
-juju destroy-model tutorial --destroy-storage --force --no-wait
+juju destroy-model tutorial --destroy-storage --force --no-wait --no-prompt
 ```
 
 <!-- test:wait --seconds 10 -->
@@ -54,7 +54,7 @@ You can see all of the available controllers by entering `juju controllers`.
 To remove the controller created for this tutorial, enter:
 
 ```shell
-juju destroy-controller opensearch-demo
+juju destroy-controller opensearch-demo --no-prompt
 ```
 
 Then, don't forget to delete the Juju model configuration file.
