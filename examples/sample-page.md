@@ -11,7 +11,8 @@ kill-timeout: 20m
 
 # Set up the environment
 
-This tutorial page demonstrates all available STAT annotations.
+This tutorial page demonstrates all available STAT annotations using the
+`self-signed-certificates` charm — a real, simple charm available on Charmhub.
 
 ## Install dependencies
 
@@ -39,16 +40,18 @@ juju bootstrap localhost overlord
 
 ## Deploy the application
 
+Deploy the `self-signed-certificates` charm from Charmhub:
+
 ```shell
-juju deploy my-app --channel=latest/stable
+juju deploy self-signed-certificates --channel=latest/stable
 ```
 
-<!-- test:await-idle --timeout 600 --allow-blocked my-app -->
+<!-- test:await-idle --timeout 600 -->
 
 ## Verify deployment
 
 <!-- test:assert
-juju status --format json | jq -e '.applications."my-app".application-status.current == "active"'
+juju status --format json | jq -e '.applications."self-signed-certificates".application-status.current == "active"'
 -->
 
 ## Skip an optional step
@@ -66,31 +69,18 @@ open https://dashboard.example.com
 Sometimes tests need extra commands not shown to readers:
 
 <!-- test:run
-juju config my-app debug-mode=true
+juju config self-signed-certificates ca-common-name="stat-test"
 -->
-
-## Extract credentials
-
-<!-- test:set-variables
-command: juju run my-app/leader get-credentials
-MY_USER: username
-MY_PASS: password
--->
-
-Use the credentials to connect:
-
-```shell
-my-cli login --user <username> --password <password>
-```
 
 ## Long-running operation with timeout
 
-<!-- test:run-with-timeout --seconds 120 -->
+<!-- test:run-with-timeout --seconds 10 -->
 
 ```shell
-my-app rebuild-index
+juju debug-log --replay --tail
 ```
 
 ## Retry a flaky command
 
-<!-- test:retry --timeout 600 --interval 60 --description "wait for endpoint" -- curl -sf http://localhost:8080/health -->
+<!-- test:retry --timeout 60 --interval 5 --description "juju status responds" -- juju status --format=oneline -->
+

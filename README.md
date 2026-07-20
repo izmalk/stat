@@ -207,6 +207,84 @@ Copy `Makefile.template` into your test directory. Customise:
 
 **`test-debug`** is the most useful mode during development. On failure, Spread prints SSH credentials for the VM. Connect, inspect state, re-run commands manually, then `exit` to let Spread clean up.
 
+## Alternative wait implementations
+
+STAT supports three implementations of the `wait_idle` helper (used by `<!-- test:await-idle -->`):
+
+| Implementation | File | Mechanism |
+|---|---|---|
+| `shell` (default) | `wait-shell.sh` | Polls `juju status` on a fixed interval |
+| `jubilant` | `wait-jubilant.sh` | Uses the [Jubilant](https://canonical.com/juju/docs/jubilant/) Python library's `Juju.wait()` |
+| `waitfor` | `wait-juju-waitfor.sh` | Uses native `juju wait-for` (Juju 3.6 only) |
+
+Select at runtime via the `STAT_WAIT_IMPL` environment variable, or use the Makefile convenience targets:
+
+```bash
+# Default (shell) — no env var needed
+make -f tests/tutorial/Makefile test
+
+# Jubilant
+make -f tests/tutorial/Makefile test-jubilant
+
+# juju wait-for (Juju 3.6 only)
+make -f tests/tutorial/Makefile test-waitfor
+```
+
+`test-continue-*` and `test-debug-*` variants are also available for each implementation.
+
+**Default is `shell`** for backward compatibility — existing repos that update STAT get zero behavior change. Jubilant is installed on-the-fly via `pip install jubilant` (no `spread.yaml` change needed).
+
+For a detailed feature comparison (parity, gaps, workarounds, Juju version compatibility), see [`alternative-implementations.md`](alternative-implementations.md). That document is analysis-only — it presents trade-offs without firm conclusions, so you can decide which implementation works best for your environment via A/B testing.
+
+### Copying the new helper files
+
+When integrating STAT into a project, copy all helper files (not just `helpers.sh`):
+
+```bash
+cp <stat-repo>/helpers.sh tests/tutorial/
+cp <stat-repo>/wait-*.sh tests/tutorial/
+```
+
+`helpers.sh` is now a dispatcher that sources the selected `wait-*.sh` file based on `STAT_WAIT_IMPL`.
+
+## Self-testing
+
+STAT includes its own test infrastructure to run a real tutorial (the [Charmed OpenSearch tutorial](https://github.com/canonical/opensearch-operator/tree/main/docs/tutorial), copied into `docs/tutorial/`) through each `wait_idle` implementation. This is useful for verifying changes to STAT itself and for A/B testing the implementations.
+
+### Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| [Multipass](https://multipass.run/) | VM provisioning backend |
+| [Spread](https://github.com/canonical/spread) | `go install github.com/canonical/spread/cmd/spread@latest` |
+| `tox` | `sudo apt install tox` or `pip install tox` |
+
+### Running the tests
+
+```bash
+# Run a single implementation
+tox -e stat-shell       # classic polling (default)
+tox -e stat-jubilant    # Jubilant Python library
+tox -e stat-waitfor     # juju wait-for (Juju 3.6 only)
+
+# Run all three sequentially
+tox -e stat-all
+```
+
+Or use `make` directly (bypasses tox):
+
+```bash
+make test              # classic (shell)
+make test-jubilant     # Jubilant
+make test-waitfor      # juju wait-for
+```
+
+Each environment provisions a fresh Multipass VM, installs Juju + LXD, runs the 7-step OpenSearch tutorial (deploy, TLS, integrate, passwords, scale, clean up), and discards the VM. The `STAT_WAIT_IMPL` environment variable is set automatically by each tox environment.
+
+### What the tutorial tests
+
+The tutorial (`docs/tutorial/`) is a real Charmed OpenSearch tutorial with STAT annotations added. It exercises `wait_idle` extensively — after every `juju deploy` and `juju integrate`, with `--allow-blocked` for apps that are expected to be blocked (e.g. `opensearch` before TLS, `data-integrator` before relation). The `examples/sample-page.md` file remains as a minimal demo of all STAT annotations.
+
 ## CI integration
 
 ### tox
@@ -324,7 +402,11 @@ These patterns emerged from real-world usage across multiple Charmed Operator tu
 | File | Purpose |
 |---|---|
 | `extract_commands.py` | Parses Markdown, extracts shell blocks, generates `.sh` scripts and `task.yaml` |
-| `helpers.sh` | Shell helpers (`wait_idle`, `retry_until_success`) sourced by generated scripts |
+| `helpers.sh` | Dispatcher: sources the selected `wait_idle` implementation + defines `retry_until_success` |
+| `wait-shell.sh` | Classic polling `wait_idle` (default) |
+| `wait-jubilant.sh` | Jubilant-based `wait_idle` (alternative) |
+| `wait-juju-waitfor.sh` | `juju wait-for` based `wait_idle` (alternative, Juju 3.6 only) |
+| `alternative-implementations.md` | Feature comparison of the three `wait_idle` implementations |
 | `spread.yaml.template` | Template Spread configuration (Multipass adhoc backend) |
 | `Makefile.template` | Template build/run automation |
 | `examples/sample-page.md` | Annotated tutorial page demonstrating all annotations |

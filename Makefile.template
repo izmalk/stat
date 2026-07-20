@@ -92,6 +92,44 @@ test-debug: extract
 	cd $(THIS_DIR) && $(SPREAD) -abend -vv -debug $(SPREAD_JOB)
 
 # ---------------------------------------------------------------------------
+# Alternative wait_idle implementations
+#
+# STAT_WAIT_IMPL selects which wait_idle implementation helpers.sh loads:
+#   shell    (default)  Poll juju status on a fixed interval (wait-shell.sh)
+#   jubilant             Use the Jubilant Python library (wait-jubilant.sh)
+#   waitfor              Use `juju wait-for` (Juju 3.6 only; wait-juju-waitfor.sh)
+#
+# The targets below are convenience wrappers that set STAT_WAIT_IMPL and
+# delegate to the corresponding test/test-continue/test-debug target. The
+# default `test` target uses `shell` (no env var needed).
+# See alternative-implementations.md for a feature comparison.
+# ---------------------------------------------------------------------------
+
+.PHONY: test-jubilant
+test-jubilant: extract
+	cd $(THIS_DIR) && STAT_WAIT_IMPL=jubilant $(SPREAD) -abend -vv $(SPREAD_JOB)
+
+.PHONY: test-continue-jubilant
+test-continue-jubilant: extract
+	cd $(THIS_DIR) && STAT_WAIT_IMPL=jubilant $(SPREAD) -vv $(SPREAD_JOB)
+
+.PHONY: test-debug-jubilant
+test-debug-jubilant: extract
+	cd $(THIS_DIR) && STAT_WAIT_IMPL=jubilant $(SPREAD) -abend -vv -debug $(SPREAD_JOB)
+
+.PHONY: test-waitfor
+test-waitfor: extract
+	cd $(THIS_DIR) && STAT_WAIT_IMPL=waitfor $(SPREAD) -abend -vv $(SPREAD_JOB)
+
+.PHONY: test-continue-waitfor
+test-continue-waitfor: extract
+	cd $(THIS_DIR) && STAT_WAIT_IMPL=waitfor $(SPREAD) -vv $(SPREAD_JOB)
+
+.PHONY: test-debug-waitfor
+test-debug-waitfor: extract
+	cd $(THIS_DIR) && STAT_WAIT_IMPL=waitfor $(SPREAD) -abend -vv -debug $(SPREAD_JOB)
+
+# ---------------------------------------------------------------------------
 # Target: help
 # ---------------------------------------------------------------------------
 .PHONY: help
@@ -103,4 +141,13 @@ help:
 	@echo "  test           Run the tutorial suite (abort on first failure)"
 	@echo "  test-continue  Run all stages even if earlier ones fail"
 	@echo "  test-debug     Drop into an interactive shell on failure"
+	@echo ""
+	@echo "Alternative wait_idle implementations (see alternative-implementations.md):"
+	@echo "  test-jubilant           Run with STAT_WAIT_IMPL=jubilant"
+	@echo "  test-continue-jubilant Run all stages with Jubilant"
+	@echo "  test-debug-jubilant     Debug mode with Jubilant"
+	@echo "  test-waitfor            Run with STAT_WAIT_IMPL=waitfor (Juju 3.6 only)"
+	@echo "  test-continue-waitfor   Run all stages with juju wait-for"
+	@echo "  test-debug-waitfor      Debug mode with juju wait-for"
+	@echo ""
 	@echo "  help           Show this help message"
