@@ -1,0 +1,63 @@
+# Spread configuration for STAT self-testing.
+#
+# This file is used by the tox environments (stat-shell, stat-jubilant,
+# stat-waitfor, stat-all) to run the sample tutorial page against each
+# wait_idle implementation.
+#
+# It provisions a Multipass VM, installs Juju + LXD, and runs the generated
+# scripts from examples/sample-page.md.
+
+project: stat-tutorial
+
+# The project root is mirrored to this path inside the test VM.
+# Must be under /root ($HOME) so the strictly-confined juju snap can access
+# project files (e.g. cloudinit-userdata.yaml passed to `juju model-config`).
+path: /root/stat
+
+backends:
+  multipass:
+    type: adhoc
+    allocate: |
+      instance_name="stat-tutorial-vm"
+      multipass delete --purge "$instance_name" 2>/dev/null || true
+
+      multipass launch --cpus "${SPREAD_VM_CPUS:-8}" --disk "${SPREAD_VM_DISK:-50G}" \
+        --memory "${SPREAD_VM_MEM:-16G}" --name "$instance_name" 24.04
+
+      multipass exec "$instance_name" -- sudo sh -c "
+        set -e
+        snap install lxd --channel=5.21/stable
+        snap install juju --channel=3/stable
+        # Install python3-venv so the Jubilant wait_idle implementation can
+        # create a venv (Ubuntu 24.04 doesn't include it by default).
+        apt-get update -qq && apt-get install -y -qq python3-venv
+        echo root:${SPREAD_PASSWORD} | chpasswd
+        printf 'PasswordAuthentication yes\nPermitRootLogin yes\n' \
+          > /etc/ssh/sshd_config.d/10-spread.conf
+        systemctl restart ssh
+      "
+
+      ip=$(multipass info --format csv "$instance_name" | tail -1 | cut -d, -f3)
+      ADDRESS "$ip"
+
+    discard: |
+      instance_name="stat-tutorial-vm"
+      multipass delete --purge "$instance_name"
+
+    systems:
+      - ubuntu-24.04-64:
+          workers: 1
+
+suites:
+  tasks/:
+    summary: STAT tutorial test
+    systems:
+      - ubuntu-24.04-64
+    environment:
+      # Pass STAT_WAIT_IMPL from the host to the VM so the correct
+      # wait_idle implementation is selected by helpers.sh.
+      # The $(HOST:...) syntax evaluates on the host running spread.
+      STAT_WAIT_IMPL: $(HOST:echo $STAT_WAIT_IMPL)
+    prepare: |
+      export HOME=/root
+      mkdir -p /root/.local/share/juju

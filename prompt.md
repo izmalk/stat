@@ -21,7 +21,11 @@ Generated scripts run with `set -euo pipefail` — any command failure aborts th
 Get the STAT framework files from https://github.com/izmalk/stat:
 
 - `extract_commands.py` — the parser/generator (do NOT modify this file)
-- `helpers.sh` — shared shell helpers (`wait_idle`, `retry_until_success`; sourced automatically by generated scripts)
+- `helpers.sh` — dispatcher that sources the selected `wait_idle` implementation and defines `retry_until_success`
+- `wait-shell.sh` — classic polling `wait_idle` (default)
+- `wait-jubilant.sh` — Jubilant-based `wait_idle` (alternative)
+- `wait-juju-waitfor.sh` — `juju wait-for` based `wait_idle` (alternative, Juju 3.6 only)
+- `alternative-implementations.md` — feature comparison of the three `wait_idle` implementations
 - `spread.yaml.template` — Spread configuration template for the Multipass adhoc backend
 - `Makefile.template` — build/run targets (`extract`, `test`, `test-continue`, `test-debug`)
 
@@ -33,6 +37,7 @@ Set up STAT for my project by completing these steps:
 
    - `extract_commands.py` → `tests/tutorial/extract_commands.py`
    - `helpers.sh` → `tests/tutorial/helpers.sh`
+   - `wait-*.sh` → `tests/tutorial/` (all three: `wait-shell.sh`, `wait-jubilant.sh`, `wait-juju-waitfor.sh`)
    - `Makefile.template` → `tests/tutorial/Makefile` (customise)
    - `spread.yaml.template` → `tests/tutorial/spread.yaml` (customise; see note below about placement)
 
@@ -189,7 +194,7 @@ After the agent completes the task, verify:
 
 - [ ] `spread.yaml` exists (either at project root or in `tests/tutorial/`) with correct project name, path, VM name, and pre-installs
 - [ ] `tests/tutorial/Makefile` has correct SCRIPTS list and paths
-- [ ] `tests/tutorial/extract_commands.py` and `tests/tutorial/helpers.sh` are present (unmodified from STAT repo)
+- [ ] `tests/tutorial/extract_commands.py`, `helpers.sh`, and `wait-*.sh` are present (unmodified from STAT repo)
 - [ ] `.gitignore` excludes generated `*.sh` and `*/task.yaml` in the test directory
 - [ ] Every tutorial page has a `<!-- test:spread -->` metadata block with appropriate priority and kill-timeout
 - [ ] No interactive/GUI/watch/browser commands appear in `` ```shell `` blocks (they use `` ```bash `` or similar)
