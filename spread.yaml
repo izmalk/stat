@@ -21,8 +21,8 @@ backends:
       instance_name="stat-tutorial-vm"
       multipass delete --purge "$instance_name" 2>/dev/null || true
 
-      multipass launch --cpus "${SPREAD_VM_CPUS:-4}" --disk "${SPREAD_VM_DISK:-30G}" \
-        --memory "${SPREAD_VM_MEM:-8G}" --name "$instance_name" 24.04
+      multipass launch --cpus "${SPREAD_VM_CPUS:-8}" --disk "${SPREAD_VM_DISK:-50G}" \
+        --memory "${SPREAD_VM_MEM:-16G}" --name "$instance_name" 24.04
 
       multipass exec "$instance_name" -- sudo sh -c "
         set -e
