@@ -60,7 +60,7 @@ juju destroy-controller opensearch-demo --no-prompt
 Then, don't forget to delete the Juju model configuration file.
 
 ```shell
-rm cloudinit-userdata.yaml
+rm -f cloudinit-userdata.yaml
 ```
 
 <!-- test:wait --seconds 10 -->
