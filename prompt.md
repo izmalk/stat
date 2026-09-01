@@ -21,9 +21,12 @@ Generated scripts run with `set -euo pipefail` — any command failure aborts th
 Get the STAT framework files from https://github.com/izmalk/stat:
 
 - `extract_commands.py` — the parser/generator (do NOT modify this file)
-- `helpers.sh` — shared shell helpers (`wait_idle`, `retry_until_success`; sourced automatically by generated scripts)
-- `spread.yaml.template` — Spread configuration template for the Multipass adhoc backend
-- `Makefile.template` — build/run targets (`extract`, `test`, `test-continue`, `test-debug`)
+- `helpers.sh` — shared shell helpers (`wait_idle`, `retry_until_success`, `collect_diagnostics`; sourced automatically by generated scripts)
+- `spread.yaml.template` — Spread configuration template for the Multipass adhoc backend (includes failure diagnostics via `debug-each`)
+- `Makefile.template` — build/run targets (`all`, `extract`, `check`, `clean`, `test`, `test-continue`, `test-debug`)
+- `tox.ini.template` — tox environments (`tutorial-extract`, `tutorial`, `tutorial-check`)
+- `.github/workflows/tutorial-tests.yaml.template` — CI workflow (KVM preflight, idempotent installs, VM purge)
+- `TESTING.md.template` — contributor documentation for the test directory
 
 ### Your task
 
@@ -48,7 +51,7 @@ Set up STAT for my project by completing these steps:
 3. **Customise `tests/tutorial/Makefile`**:
 
    - Set `ROOT` (number of `../` levels to reach project root)
-   - Set `SCRIPTS` — list of `output.sh:source.md` pairs, one per tutorial page
+   - Set `SCRIPTS` — list of `output.sh:source.md` pairs, one per tutorial page (enables incremental `make all`; `make extract` uses directory discovery and needs no list)
    - Set `SPREAD_JOB` — the Spread job selector path
    - Adjust `extract` target input/output directory paths
 
@@ -70,17 +73,17 @@ When `spread.yaml` lives in `tests/tutorial/`:
 
 ### Available annotations
 
-| Annotation | Purpose |
-|---|---|
-| `<!-- test:spread -->` | **Required.** Spread task metadata (priority, kill-timeout). Makes the page discoverable. Higher priority = runs first. |
-| `<!-- test:skip -->` | Skip the next `` ```shell `` block. **Prefer using a non-`shell` fence tag instead** (e.g. `` ```bash ``) — it achieves the same effect without an extra comment. |
-| `<!-- test:wait --seconds N -->` | Emit `sleep N` at that point. |
-| `<!-- test:await-idle -->` | Wait until all Juju units are active/idle. Accepts `--timeout S`, `--allow-blocked APP1,APP2`. |
-| `<!-- test:run -->` | Emit hidden shell commands (not rendered in docs). Ends at `-->`. |
-| `<!-- test:run-with-timeout --seconds N -->` | Run the next shell block inside `timeout N`; ignore exit code (for commands that run indefinitely like streaming jobs or `kubectl logs -f`). |
-| `<!-- test:set-variables -->` | Run a command, extract named fields into shell variables for placeholder substitution. |
-| `<!-- test:assert -->` | Hidden assertion block. Relies on `set -e` to abort on failure. |
-| `<!-- test:retry --timeout N --interval M --description "..." -- COMMAND -->` | Retry a command until success or timeout. |
+| Annotation | Form | Purpose |
+|---|---|---|
+| `<!-- test:spread -->` | multi-line | **Required.** Spread task metadata (priority, kill-timeout). Makes the page discoverable. Higher priority = runs first. |
+| `<!-- test:skip -->` | single-line | Skip the next `` ```shell `` block. **Prefer using a non-`shell` fence tag instead** (e.g. `` ```bash ``) — it achieves the same effect without an extra comment. |
+| `<!-- test:wait --seconds N -->` | single-line | Emit `sleep N` at that point. |
+| `<!-- test:await-idle -->` | single-line | Wait until all Juju units are active/idle. Accepts `--timeout S` (default 1200), `--interval S` (default 30), `--allow-blocked APP1,APP2`. |
+| `<!-- test:run -->` | multi-line | Emit hidden shell commands (not rendered in docs). Ends at `-->`. |
+| `<!-- test:run-with-timeout --seconds N -->` | single-line | Run the next shell block inside `timeout N`; ignore exit code (for commands that run indefinitely like streaming jobs or `kubectl logs -f`). |
+| `<!-- test:set-variables -->` | multi-line | Run a command, extract named fields into shell variables for placeholder substitution. |
+| `<!-- test:assert -->` | multi-line | Hidden assertion block. Relies on `set -e` to abort on failure. |
+| `<!-- test:retry --timeout N --interval M --description "..." -- COMMAND -->` | single-line | Retry a command until success or timeout. Add `--shell` to allow pipes/redirects in COMMAND. |
 
 ### Key design principles (lessons learned)
 
@@ -104,7 +107,13 @@ When `spread.yaml` lives in `tests/tutorial/`:
 
 **Add sleeps after scaling operations.** After `juju add-unit` or similar scale-up commands, internal rebalancing (e.g. shard redistribution in databases) takes time. A `<!-- test:wait --seconds 60 -->` before assertions that check cluster state prevents flaky failures.
 
-**Retry flaky commands.** Network-dependent commands (like `aws s3 ls` against a freshly-enabled MinIO) may fail on first attempt. Use either `<!-- test:run -->` with a retry loop, or `<!-- test:retry -->` annotation.
+**Retry flaky commands.** Network-dependent commands (like `aws s3 ls` against a freshly-enabled MinIO) may fail on first attempt. Use either `<!-- test:run -->` with a retry loop, or `<!-- test:retry -->` annotation. Note `test:retry` quotes every command token by default (no pipes/redirects); add `--shell` when the command needs full shell syntax.
+
+**Prefer Python over grep for structured assertions.** When asserting on `juju status`, an inline Python snippet parsing `--format=json` is more robust than grepping formatted output. Keep assertions deliberately loose (`grep -q` for a key field) — strict assertions fail on harmless formatting changes.
+
+**Use hidden `test:run` blocks for non-interactive variants.** When the docs show an interactive command (e.g. `juju remove-unit app/3`), keep it visible but execute a hidden `--no-prompt` variant via `<!-- test:run -->` so the test doesn't hang on a prompt. Similarly, use heredocs in `test:run` to materialise data files the docs only show as fenced content.
+
+**Use `--allow-blocked` for expected-blocked apps.** Apps legitimately `blocked/idle` at a given step (e.g. a data-integrator before its relation exists) must be allow-listed in `<!-- test:await-idle -->`, or the wait never settles.
 
 **Use `--channel` in deploy commands.** Always include `--channel` in `juju deploy` commands in the tutorial to pin to a specific track. Omitting it makes the tutorial dependent on whichever channel is marked as default at the time, causing drift.
 
@@ -196,7 +205,10 @@ After the agent completes the task, verify:
 - [ ] `juju deploy`/`integrate` blocks are followed by `<!-- test:await-idle -->` (Juju tutorials only)
 - [ ] Commands that depend on state from a previous command are in **separate** shell blocks with appropriate waits between
 - [ ] Running `python3 extract_commands.py <input_dir> <output_dir>` succeeds and generates correct scripts
+- [ ] `python3 extract_commands.py --check <input_dir> <output_dir>` exits 0 (generated files up to date)
+- [ ] Every generated `.sh` script parses: `bash -n tasks/*.sh`
 - [ ] Generated `.sh` scripts don't contain skipped commands (grep for known patterns)
+- [ ] No annotation warnings on stderr (or run with `--strict` to enforce)
 
 ## Next step
 

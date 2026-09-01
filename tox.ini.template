@@ -1,0 +1,34 @@
+# tox integration for tutorial testing.
+#
+# Copy these environments into your project's tox.ini (or create one).
+# Paths assume the STAT files live at tests/tutorial/ and the tutorial
+# sources at docs/tutorial/ — adjust to your layout.
+
+[tox]
+# Add "tutorial-extract" and "tutorial" to your existing envlist, e.g.:
+# envlist = lint, unit, integration, tutorial-extract, tutorial
+envlist = tutorial-extract, tutorial
+
+[testenv:tutorial-extract]
+description = Generate tutorial test scripts from Markdown sources
+skip_install = True
+commands =
+    python3 tests/tutorial/extract_commands.py docs/tutorial/ tests/tutorial/tasks/
+
+[testenv:tutorial]
+description = Run the tutorial end-to-end test suite via Spread (requires Multipass and Spread)
+skip_install = True
+# change_dir is essential: Spread must run from the directory containing
+# spread.yaml so that relative suite paths (tasks/) resolve correctly.
+change_dir = {tox_root}/tests/tutorial
+allowlist_externals =
+    spread
+commands =
+    python3 extract_commands.py ../../docs/tutorial/ ./tasks/
+    spread -vv multipass:ubuntu-24.04-64:tasks/
+
+[testenv:tutorial-check]
+description = Verify generated tutorial scripts are up to date (CI guard; writes nothing)
+skip_install = True
+commands =
+    python3 tests/tutorial/extract_commands.py --check docs/tutorial/ tests/tutorial/tasks/

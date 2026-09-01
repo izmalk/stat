@@ -1,0 +1,77 @@
+# Tutorial test workflow template.
+#
+# Copy this file to .github/workflows/tutorial-tests.yaml in your project
+# and customise the values marked TODO.
+#
+# Notes:
+# - Multipass requires KVM; the preflight check fails fast with a clear
+#   message when the runner lacks it.
+# - All installs are idempotent (guarded with `command -v`) so the workflow
+#   works on both bare and pre-provisioned self-hosted runners.
+# - The Multipass VM is purged with `if: always()` so a failed run cannot
+#   leak a VM into the next run.
+# - If you use self-hosted runners with custom labels, they must also be
+#   allowlisted in .github/actionlint.yaml (e.g. `- xlarge`), otherwise
+#   the actionlint check fails.
+
+name: Tutorial tests
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  schedule:
+    # TODO: Adjust the cadence. Monthly is a reasonable default for
+    # full-tutorial runs that take 1-3 hours.
+    - cron: '0 3 1 * *'  # 1st of every month at 03:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  tutorial-test:
+    name: Tutorial end-to-end
+    # TODO: Set runner labels. Tutorial VMs need significant RAM
+    # (16G+); use a large/xlarge self-hosted runner if available.
+    runs-on: [self-hosted, linux, amd64, xlarge, noble]
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check KVM availability
+        run: |
+          if [[ ! -e /dev/kvm ]]; then
+            echo "::error::KVM is not available on this runner. Multipass requires KVM for VM creation."
+            exit 1
+          fi
+
+      - name: Install Multipass
+        run: |
+          if ! command -v multipass &>/dev/null; then
+            sudo snap install multipass
+          fi
+
+      - name: Install Go and Spread
+        run: |
+          if ! command -v go &>/dev/null; then
+            sudo snap install go --classic
+          fi
+          go install github.com/canonical/spread/cmd/spread@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Install tox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pipx
+          pipx install tox
+
+      - name: Run tutorial tests
+        run: tox -e tutorial
+
+      # TODO: Set the VM instance name to match spread.yaml.template.
+      - name: Cleanup Multipass VM
+        if: always()
+        run: |
+          multipass delete --purge my-tutorial-vm 2>/dev/null || true

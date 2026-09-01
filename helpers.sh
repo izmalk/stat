@@ -21,7 +21,8 @@ export HOME=/root
 #             [--allow-blocked APP1,APP2,...]
 #
 # Defaults:
-#   --timeout  600   (10 minutes)
+#   --timeout  1200  (20 minutes; matches the default injected by
+#                     extract_commands.py's test:await-idle annotation)
 #   --interval  30   (check every 30 seconds)
 #
 # --allow-blocked accepts a comma-separated list of application names that
@@ -38,7 +39,7 @@ export HOME=/root
 # Returns 0 when all units are active/idle, 1 on timeout.
 # ---------------------------------------------------------------------------
 wait_idle() {
-    local timeout=600
+    local timeout=1200
     local interval=30
     local allow_blocked=""
 
@@ -157,4 +158,47 @@ retry_until_success() {
 
     echo "ERROR: ${description} did not succeed within ${timeout}s"
     return 1
+}
+
+# ---------------------------------------------------------------------------
+# collect_diagnostics – dump Juju and host state into a directory for
+# post-mortem debugging of a failed tutorial run.
+#
+# Usage:
+#   collect_diagnostics [--dir DIRECTORY]
+#
+# Defaults:
+#   --dir  ${SPREAD_ARTIFACTS:-/tmp/tutorial-artifacts}
+#
+# Every command is individually guarded so a failure to collect one piece
+# of diagnostics can never fail the calling script. Intended to be wired
+# into the suite's ``debug-each:`` script in spread.yaml, which Spread runs
+# when a task fails.
+# ---------------------------------------------------------------------------
+collect_diagnostics() {
+    local dir="${SPREAD_ARTIFACTS:-/tmp/tutorial-artifacts}"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir) dir="$2"; shift 2 ;;
+            *) echo "collect_diagnostics: unknown option: $1" >&2; return 1 ;;
+        esac
+    done
+
+    mkdir -p "$dir" || return 1
+    echo "Collecting diagnostics into ${dir}…"
+
+    juju status >"${dir}/juju-status.txt" 2>&1 || true
+    juju status --format=json >"${dir}/juju-status.json" 2>&1 || true
+    juju models >"${dir}/juju-models.txt" 2>&1 || true
+    juju machines >"${dir}/juju-machines.txt" 2>&1 || true
+    juju debug-log --replay --no-tail >"${dir}/juju-debug-log.txt" 2>&1 || true
+
+    sysctl vm.max_map_count vm.swappiness >"${dir}/sysctl.txt" 2>&1 || true
+    free -h >"${dir}/free.txt" 2>&1 || true
+    df -h >"${dir}/df.txt" 2>&1 || true
+
+    # Repeat the location in the closing line so it stays visible next to
+    # the failure output in long Spread logs.
+    echo "Diagnostics collected in ${dir}."
 }

@@ -38,22 +38,37 @@ TASKS_DIR := $(THIS_DIR)tasks
 # Execution order is determined by the ``priority`` field in each file's
 # ``<!-- test:spread ... -->`` metadata block.
 #
-# NOTE: With directory discovery mode (recommended), you don't need to list
-# individual files here. The `extract` target auto-discovers all .md files
-# with spread metadata. Only define SCRIPTS if you need fine-grained control.
+# Directory discovery (the ``extract`` target) is the recommended default:
+# it auto-discovers all .md files with spread metadata and requires no
+# maintenance. Define SCRIPTS only if you want ``make all`` to regenerate
+# changed pages incrementally (timestamp-based) instead of regenerating
+# everything.
 #
-# TODO: Uncomment and customise if you need explicit pairs instead of discovery.
-# SCRIPTS := \
-#     $(TASKS_DIR)/setup.sh:$(TUTORIAL_SRC)/setup.md \
-#     $(TASKS_DIR)/deploy.sh:$(TUTORIAL_SRC)/deploy.md \
-#     $(TASKS_DIR)/cleanup.sh:$(TUTORIAL_SRC)/cleanup.md
-#
-# OUTPUTS := $(foreach pair,$(SCRIPTS),$(word 1,$(subst :, ,$(pair))))
+# TODO: Customise the page list to match your tutorial.
+SCRIPTS := \
+    $(TASKS_DIR)/setup.sh:$(TUTORIAL_SRC)/setup.md \
+    $(TASKS_DIR)/deploy.sh:$(TUTORIAL_SRC)/deploy.md \
+    $(TASKS_DIR)/cleanup.sh:$(TUTORIAL_SRC)/cleanup.md
+
+OUTPUTS := $(foreach pair,$(SCRIPTS),$(word 1,$(subst :, ,$(pair))))
+
+# Incremental per-page rules: regenerate an output only when its source
+# page or the extractor changes.
+define make_rule
+$(word 1,$(subst :, ,$(1))): $(word 2,$(subst :, ,$(1))) $(EXTRACT)
+	cd $(THIS_DIR) && $(PYTHON) extract_commands.py $(word 2,$(subst :, ,$(1))) $(word 1,$(subst :, ,$(1)))
+endef
+$(foreach pair,$(SCRIPTS),$(eval $(call make_rule,$(pair))))
 
 # ---------------------------------------------------------------------------
 # rel — convert an absolute path to a root-relative path
 # ---------------------------------------------------------------------------
 rel = $(patsubst $(ROOT)/%,%,$(1))
+
+# ---------------------------------------------------------------------------
+# Target: all (default) — incremental regeneration via the SCRIPTS list
+# ---------------------------------------------------------------------------
+all: $(OUTPUTS)
 
 # ---------------------------------------------------------------------------
 # Target: extract  (directory discovery — recommended)
@@ -62,6 +77,21 @@ rel = $(patsubst $(ROOT)/%,%,$(1))
 .PHONY: extract
 extract:
 	cd $(ROOT) && $(PYTHON) $(call rel,$(EXTRACT)) $(call rel,$(TUTORIAL_SRC))/ $(call rel,$(TASKS_DIR))/
+
+# ---------------------------------------------------------------------------
+# Target: check — verify generated files are up to date (CI guard)
+# ---------------------------------------------------------------------------
+.PHONY: check
+check:
+	cd $(ROOT) && $(PYTHON) $(call rel,$(EXTRACT)) --check $(call rel,$(TUTORIAL_SRC))/ $(call rel,$(TASKS_DIR))/
+
+# ---------------------------------------------------------------------------
+# Target: clean — remove generated scripts and task directories
+# ---------------------------------------------------------------------------
+.PHONY: clean
+clean:
+	rm -f $(TASKS_DIR)/*.sh
+	rm -rf $(TASKS_DIR)/*/task.yaml
 
 # ---------------------------------------------------------------------------
 # Spread configuration
@@ -99,7 +129,10 @@ help:
 	@echo "Usage: make -f tests/tutorial/Makefile [target]"
 	@echo ""
 	@echo "Targets:"
+	@echo "  all            Regenerate changed pages only (via the SCRIPTS list)"
 	@echo "  extract        Regenerate all scripts via directory discovery"
+	@echo "  check          Verify generated files are up to date (no writes)"
+	@echo "  clean          Remove generated scripts and task directories"
 	@echo "  test           Run the tutorial suite (abort on first failure)"
 	@echo "  test-continue  Run all stages even if earlier ones fail"
 	@echo "  test-debug     Drop into an interactive shell on failure"

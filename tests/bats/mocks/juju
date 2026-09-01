@@ -1,0 +1,81 @@
+#!/bin/bash
+# Mock juju for bats tests of helpers.sh.
+#
+# Behaviour is selected via the JUJU_MOCK_STATE env var:
+#   all-idle     – every unit active/idle
+#   one-busy     – one unit still starting
+#   blocked-idle – data-integrator blocked/idle, others active/idle
+#   empty        – no applications at all (provisioning)
+#   broken       – emits invalid JSON
+#
+# Successive polls can vary: set JUJU_MOCK_SEQUENCE to a
+# comma-separated list of states, e.g. "empty,one-busy,all-idle".
+# The mock advances one state per "juju status" call.
+
+_jeu() {
+    # JSON-escape helper for embedding in the status output.
+    printf '%s' "$1"
+}
+
+_emit_status() {
+    local state="$1"
+    case "$state" in
+        all-idle)
+            cat <<'EOF'
+{"applications":{"my-app":{"units":{"my-app/0":{"workload-status":{"current":"active"},"juju-status":{"current":"idle"}},"my-app/1":{"workload-status":{"current":"active"},"juju-status":{"current":"idle"}}}}}}
+EOF
+            ;;
+        one-busy)
+            cat <<'EOF'
+{"applications":{"my-app":{"units":{"my-app/0":{"workload-status":{"current":"active"},"juju-status":{"current":"idle"}},"my-app/1":{"workload-status":{"current":"executing"},"juju-status":{"current":"busy"}}}}}}
+EOF
+            ;;
+        blocked-idle)
+            cat <<'EOF'
+{"applications":{"my-app":{"units":{"my-app/0":{"workload-status":{"current":"active"},"juju-status":{"current":"idle"}}}},"data-integrator":{"units":{"data-integrator/0":{"workload-status":{"current":"blocked"},"juju-status":{"current":"idle"}}}}}}
+EOF
+            ;;
+        empty)
+            echo '{"applications":{}}'
+            ;;
+        broken)
+            echo 'this is not json'
+            ;;
+        *)
+            echo "juju mock: unknown state: $state" >&2
+            exit 1
+            ;;
+    esac
+}
+
+_next_state() {
+    local seq="${JUJU_MOCK_SEQUENCE:-}"
+    if [[ -n "$seq" ]]; then
+        # Advance a counter stored in a temp file, one state per call.
+        local counter_file="${BATS_TMPDIR:-/tmp}/juju-mock-counter"
+        local n
+        n=$(cat "$counter_file" 2>/dev/null || echo 0)
+        echo $(( n + 1 )) >"$counter_file"
+        # shellcheck disable=SC2206 # word splitting is intended here
+        local states=(${seq//,/ })
+        echo "${states[$n]:-${states[-1]}}"
+    else
+        echo "${JUJU_MOCK_STATE:-all-idle}"
+    fi
+}
+
+main() {
+    if [[ "$1 $2" == "status --format=json" ]]; then
+        _emit_status "$(_next_state)"
+        exit 0
+    fi
+    if [[ "$1" == "status" ]]; then
+        echo "Model        Controller  Cloud/Region  Version"
+        echo "tutorial     overlord     lxd/local     3.6.2"
+        exit 0
+    fi
+    echo "juju mock: unsupported invocation: $*" >&2
+    exit 1
+}
+
+main "$@"

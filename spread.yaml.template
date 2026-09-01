@@ -10,8 +10,14 @@
 project: my-project-tutorial
 
 # The project root is mirrored to this path inside the test VM.
-# TODO: Set to a short, descriptive path (e.g. /my-project).
-path: /my-project
+# /root/spread_project is the tested-working default: Spread connects as
+# root and helpers.sh exports HOME=/root, so keeping everything under /root
+# avoids permission surprises.
+path: /root/spread_project
+
+# Hard ceiling for any single Spread operation (task, prepare, restore).
+# Tutorial tasks routinely take 30-60 minutes each; 3h leaves headroom.
+kill-timeout: 3h
 
 backends:
   multipass:
@@ -55,10 +61,18 @@ backends:
 #
 # TODO: Adjust if your generated scripts live elsewhere.
 suites:
-  ./tasks/:
+  tasks/:
     summary: Tutorial end-to-end test
     systems:
       - ubuntu-24.04-64
     prepare: |
       export HOME=/root
       mkdir -p /root/.local/share/juju
+    # Run when any task fails: dump Juju/host state for post-mortem
+    # debugging. collect_diagnostics never fails the run itself.
+    debug-each: |
+      . "$SPREAD_PATH/helpers.sh"
+      collect_diagnostics --dir "$SPREAD_PATH/tasks/artifacts/$SPREAD_SYSTEM"
+    # Fetched (with `spread -artifacts=...`) whether the job passed or not.
+    artifacts:
+      - tasks/artifacts/

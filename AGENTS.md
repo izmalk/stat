@@ -26,7 +26,11 @@ a deployed service. There is no server, no database, no build step beyond
 | `extract_commands.py` | Core parser/generator. The only "real" program in the repo. | Yes, carefully — see below |
 | `helpers.sh` | Bash helpers (`wait_idle`, `retry_until_success`) sourced by every generated script | Yes |
 | `Makefile.template` | Template copied into a downstream repo's test dir, then customised | Yes (keep `TODO` markers) |
-| `spread.yaml.template` | Template Spread config (Multipass adhoc backend) | Yes (keep `TODO` markers) |
+| `spread.yaml.template` | Template Spread config (Multipass adhoc backend, `debug-each` diagnostics) | Yes (keep `TODO` markers) |
+| `tox.ini.template` | Template tox envs (`tutorial-extract`, `tutorial`, `tutorial-check`) | Yes (keep paths generic) |
+| `.github/workflows/tutorial-tests.yaml.template` | Template CI workflow (KVM preflight, idempotent installs, VM purge) | Yes (keep `TODO` markers) |
+| `TESTING.md.template` | Template contributor docs for the downstream test dir | Yes |
+| `tests/` | STAT's own test suite: pytest golden-file tests, bats tests with a mocked `juju`, fixtures | Yes |
 | `examples/sample-page.md` | Reference Markdown demonstrating every annotation | Keep in sync with README |
 | `prompt.md` | A ready-to-use prompt for an agent to *integrate* STAT into a downstream product repo | Keep in sync with README/annotations |
 | `README.md` | User-facing documentation: annotation reference, integration steps, lessons learned | Keep in sync with code |
@@ -67,25 +71,49 @@ backend or tutorial source configured in this repo.
 
 ## Testing / validation
 
-There is no automated test suite (no `pytest`, no CI workflow in this repo
-at present). Validate changes to `extract_commands.py` manually:
+This repo has a full test suite (pytest golden-file tests + bats tests with
+a mocked `juju` + shellcheck + ruff). Run everything with:
+
+```bash
+tox -e lint,unit,shell
+# or directly:
+.venv/bin/ruff check . && .venv/bin/ruff format --check .
+.venv/bin/python -m pytest
+shellcheck helpers.sh && bats tests/bats
+```
+
+### Golden-file workflow
+
+`tests/fixtures/*.md` are small single-purpose pages; `tests/golden/*.sh`
+hold the expected generated output. When a change to `extract_commands.py`
+**intentionally** alters generated output:
+
+1. Regenerate the goldens: `python3 tests/regen_golden.py`
+2. Review the resulting `git diff` carefully — it is the explicit record of
+   the behavior change.
+
+When adding a new annotation or behavior, add a fixture + golden file and a
+small test rather than only testing manually.
+
+### Manual checks
 
 1. Run it against `examples/sample-page.md` (covers every annotation type)
    and inspect the generated script for correctness:
    ```bash
    python3 extract_commands.py examples/sample-page.md
    ```
-2. Confirm only ` ```shell ` fences are extracted, and every annotation
-   (`test:skip`, `test:wait`, `test:await-idle`, `test:run-with-timeout`,
-   `test:set-variables`, `test:run`, `test:assert`, `test:retry`,
-   `test:spread`) produces the expected shell snippet — cross-check against
-   the "Annotations" table in `README.md`.
+2. Cross-check every annotation against the "Annotations" table in
+   `README.md`.
 3. If you change the `task.yaml` generation (`build_task_yaml`), verify the
    output still uses `$SPREAD_TASK` (not a hardcoded path) — this is what
    makes generated suites portable across different `spread.yaml` locations.
 4. When adding a new annotation, add a demonstrating snippet to
    `examples/sample-page.md` and document it in the README's annotation
    table and `prompt.md`'s annotation table (both must stay in sync).
+5. Keep the code lint-clean under the downstream ruff config
+   (`py310`, 99 cols, `E,W,F,C90,N,D,I`, mccabe ≤ 10) — downstream repos lint
+   the copied file, and the dispatch-table structure exists to satisfy
+   `max-complexity = 10`.
 
 ## Code style
 
@@ -117,12 +145,23 @@ at present). Validate changes to `extract_commands.py` manually:
   Single-line forms of these same tags are intentionally *not* recognised.
   Don't "fix" this without updating the README, which documents it as
   by-design.
-- **`<!-- test:skip -->` cancels on any intervening non-empty line** before
-  the next ` ```shell ` fence. Preserve this behavior exactly (see
-  `state.skip_next` reset logic in `extract_shell_blocks`).
+- **`<!-- test:skip -->` cancels on any intervening plain-text line** before
+  the next ` ```shell ` fence, but **not** on intervening annotations (an
+  annotation between the skip and the fence still emits its own effect and
+  the block remains skipped). Preserve this behavior exactly (see
+  `state.skip_next` reset logic in `extract_shell_blocks` and the
+  `skip-not-cancelled-by-annotation` fixture).
 - **`task.yaml` must use `$SPREAD_TASK`**, not a hardcoded script path, so
   generated suites remain portable regardless of where `spread.yaml` lives
   in a downstream repo.
+- **`task.yaml` `summary` must be YAML-safe** (emitted via `json.dumps`),
+  and `priority` / `kill-timeout` are validated — headings with quotes must
+  not produce broken YAML.
+- **Unknown annotation options must warn** (and fail under `--strict`),
+  never be silently dropped. `extract_heading` / `extract_spread_meta`
+  must stay fence-aware (ignore content inside code samples).
+- **Generated file headers must use repo-relative paths** so output is
+  reproducible regardless of checkout location.
 - **Environment variables set via `test:set-variables` do not persist
   across Spread tasks** (each page is a separate script/process). Don't
   design new features that assume in-memory state survives between pages;

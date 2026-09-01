@@ -1,0 +1,93 @@
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install ruff
+        run: pipx install ruff
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check --diff .
+
+  unit:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install pytest pyyaml
+      - name: Run unit tests
+        run: pytest tests/
+
+  shell:
+    name: Shell tests (shellcheck + bats)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install shellcheck and bats
+        run: sudo apt-get update && sudo apt-get install -y shellcheck bats
+      - name: shellcheck helpers.sh
+        run: shellcheck helpers.sh
+      - name: bats
+        run: bats tests/bats
+
+  generate-examples:
+    name: Generate examples and validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Generate scripts from examples
+        run: python3 extract_commands.py examples/ /tmp/tasks/
+      - name: Check --check mode
+        run: python3 extract_commands.py --check examples/ /tmp/tasks/
+      - name: Validate generated scripts parse
+        run: |
+          for script in /tmp/tasks/*.sh; do
+            bash -n "$script"
+          done
+      - name: Validate task.yaml files
+        run: |
+          pip install pyyaml
+          python3 - <<'EOF'
+          import glob, yaml
+          for path in glob.glob("/tmp/tasks/*/task.yaml"):
+              with open(path) as f:
+                  data = yaml.safe_load(f)
+              assert "$SPREAD_TASK" in data["execute"], path
+          print(f"Validated {len(glob.glob('/tmp/tasks/*/task.yaml'))} task.yaml files")
+          EOF
