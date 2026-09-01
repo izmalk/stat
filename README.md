@@ -172,21 +172,6 @@ Some explanatory text here cancels the skip.
 ```
 ~~~
 
-~~~markdown
-<!-- test:skip -->
-
-```shell
-# This block IS skipped
-```
-
-<!-- test:skip -->
-Some explanatory text here cancels the skip.
-
-```shell
-# This block is NOT skipped
-```
-~~~
-
 See [`examples/sample-page.md`](examples/sample-page.md) for a complete demonstration of all annotations in context.
 
 ### Unknown options are reported
@@ -389,6 +374,42 @@ Downstream repos typically lint the copied `extract_commands.py` with ruff. STAT
 - Google-style docstrings on every function
 
 STAT's own CI (`.github/workflows/ci.yaml`) runs exactly this configuration, plus pytest golden-file tests and bats tests with a mocked `juju`.
+
+## Developing STAT
+
+STAT's own test suite lives in `tests/`:
+
+- `tests/fixtures/*.md` — small single-purpose tutorial pages, one per annotation/edge case
+- `tests/golden/*.sh` — the expected generated output for each fixture (golden files)
+- `tests/test_extract_commands.py` — pytest suite: golden comparisons, annotation semantics, CLI end-to-end, `bash -n` on every generated script
+- `tests/bats/` — bats tests for `helpers.sh` (`wait_idle`, `retry_until_success`, `collect_diagnostics`) using a mocked `juju` binary
+
+### Running the tests
+
+Everything (mirrors CI):
+
+```bash
+tox -e lint,unit,shell
+```
+
+Or directly:
+
+```bash
+.venv/bin/ruff check . && .venv/bin/ruff format --check .   # lint
+.venv/bin/python -m pytest                                  # unit tests
+shellcheck helpers.sh && bats tests/bats                      # shell tests
+```
+
+Prerequisites: Python 3.10+ with `pytest`, `pyyaml` and `ruff` installed (e.g. in a `.venv`), plus `shellcheck` and `bats` (`sudo apt-get install shellcheck bats`) for the shell suite.
+
+### Changing generated output (golden-file workflow)
+
+When a change to `extract_commands.py` **intentionally** alters generated output:
+
+1. Regenerate the goldens: `python3 tests/regen_golden.py` (or pass specific fixture names)
+2. Review the resulting `git diff` on `tests/golden/` carefully — it is the explicit record of the behavior change
+
+When adding a new annotation or behavior, add a fixture + golden file and a test rather than only testing manually.
 
 ## File reference
 
